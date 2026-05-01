@@ -1,59 +1,126 @@
 import { useState, useEffect } from "react";
 
-// ─── CONSTANTS ─────────────────────────────────────────────────────────────────
-const COOKING_GROUPS = [
-  { id: "g1", name: "South Indian Devotees",   color: "#c0622a" },
-  { id: "g2", name: "North Indian Devotees",   color: "#2d7d9a" },
-  { id: "g3", name: "Fijian Devotees",         color: "#3a8a5c" },
-  { id: "g4", name: "International Devotees",  color: "#7a4fa0" },
-];
+// ─── EMAILJS CONFIG ────────────────────────────────────────────────────────────
+// Replace these with your EmailJS credentials (instructions below)
+const EMAILJS_SERVICE_ID  = "YOUR_SERVICE_ID";
+const EMAILJS_TEMPLATE_ID = "YOUR_TEMPLATE_ID";
+const EMAILJS_PUBLIC_KEY  = "YOUR_PUBLIC_KEY";
 
+async function sendRealEmail(toName, toEmail, subject, body) {
+  try {
+    const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service_id:  EMAILJS_SERVICE_ID,
+        template_id: EMAILJS_TEMPLATE_ID,
+        user_id:     EMAILJS_PUBLIC_KEY,
+        template_params: {
+          to_name:  toName,
+          to_email: toEmail,
+          subject,
+          message:  body,
+          reply_to: "bhaktiyoga.org@gmail.com",
+        },
+      }),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+// ─── CLAUDE API ────────────────────────────────────────────────────────────────
+async function callClaude(prompt) {
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 700,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    const d = await res.json();
+    return d.content?.[0]?.text || "";
+  } catch { return ""; }
+}
+
+async function genWelcomeEmail(name, email, password) {
+  return callClaude(`Write a short warm welcome email for ${name} joining Bhakti Yoga Foundation volunteer roster. Login: email=${email}, password=${password}. Org: Bhakti Yoga Foundation (Simple Living·High Thinking), Queensland AU. Reply-to: bhaktiyoga.org@gmail.com. Only email body, warm spiritual tone, 3 short paragraphs, include credentials clearly, end "In loving service, Bhakti Yoga Foundation". Plain text.`);
+}
+
+async function genRosterEmail(name, assignments) {
+  const list = assignments.map(a => `- ${a.role} on ${fmtLong(a.sunday)} (${a.time}, ${a.session} Program)`).join("\n");
+  return callClaude(`Write a warm confirmation email for Bhakti Yoga Foundation devotee ${name} who signed up for:\n${list}\nRemind them to speak to admin for any changes. Reply-to: bhaktiyoga.org@gmail.com. Only email body, spiritual warm tone, end "In loving service, Bhakti Yoga Foundation". Plain text.`);
+}
+
+// ─── DEFAULT SETTINGS ──────────────────────────────────────────────────────────
+const DEFAULT_SETTINGS = {
+  signupOpensDay: 24,
+  morningVenue: "Pendicup Community Centre, Samsonvale Road, Warner QLD 4500",
+  cookingGroups: [
+    { id:"g1", name:"South Indian Devotees",  color:"#c0622a" },
+    { id:"g2", name:"North Indian Devotees",  color:"#2d7d9a" },
+    { id:"g3", name:"Fijian Devotees",        color:"#3a8a5c" },
+    { id:"g4", name:"International Devotees", color:"#7a4fa0" },
+  ],
+  // Evening venue can be set per-Sunday in the roster
+};
+
+// ─── ROLE DEFINITIONS ──────────────────────────────────────────────────────────
 const MORNING_ROLES = [
-  { id:"kids1",   label:"Kids Class 1",     desc:"Ages up to 8 · Vedic culture & values",  time:"9:30–11:00 AM", icon:"🌱" },
-  { id:"kids2",   label:"Kids Class 2",     desc:"Ages 9–16 · Deeper exploration",          time:"9:30–11:00 AM", icon:"📖" },
-  { id:"adult",   label:"Adult Class",      desc:"Bhagavad Gita discourse for parents",     time:"9:30–11:00 AM", icon:"🕊️" },
-  { id:"manager", label:"Program Manager",  desc:"Coordinates the morning session",         time:"9:00–11:30 AM", icon:"📋" },
+  { id:"kids1",   label:"Kids Class 1",      desc:"Ages up to 8 · Vedic culture & values", time:"9:30–11:00 AM", icon:"🌱" },
+  { id:"kids2",   label:"Kids Class 2",      desc:"Ages 9–16 · Deeper exploration",         time:"9:30–11:00 AM", icon:"📖" },
+  { id:"adult",   label:"Adult Class",       desc:"Bhagavad Gita discourse for parents",    time:"9:30–11:00 AM", icon:"🕊️" },
+  { id:"manager", label:"Program Manager",   desc:"Coordinates the morning session",        time:"9:00–11:30 AM", icon:"📋" },
 ];
-
 const EVENING_ROLES = [
-  { id:"setup",   label:"Setup",              desc:"Venue setup & decoration",     time:"4:00–5:00 PM", icon:"🏮" },
-  { id:"aarati",  label:"Aarati",             desc:"Sacred lamp ceremony",         time:"5:00–5:30 PM", icon:"🪔" },
-  { id:"bgclass", label:"Bhagavad Gita Class",desc:"Evening discourse",            time:"5:30–6:30 PM", icon:"📿" },
-  { id:"bhajan",  label:"Bhajan Singing",     desc:"Devotional kirtan & singing",  time:"5:00–7:00 PM", icon:"🎵" },
+  { id:"setup",   label:"Setup",               desc:"Venue setup & decoration",    time:"4:00–5:00 PM", icon:"🏮" },
+  { id:"aarati",  label:"Aarati",              desc:"Sacred lamp ceremony",        time:"5:00–5:30 PM", icon:"🪔" },
+  { id:"bgclass", label:"Bhagavad Gita Class", desc:"Evening discourse",           time:"5:30–6:30 PM", icon:"📿" },
+  { id:"bhajan",  label:"Bhajan Singing",      desc:"Devotional kirtan & singing", time:"5:00–7:00 PM", icon:"🎵" },
 ];
-
-const SIGNUP_OPENS_DAY = 24;
+const EVENING_VENUES = [
+  "Pendicup Community Centre, Warner",
+  "Bray Hall Community Centre, Petrie",
+];
 
 // ─── SEED USERS ────────────────────────────────────────────────────────────────
 const SEED_USERS = [
   { id:"admin", name:"Keshav Kandel",  email:"108divinerhythm@gmail.com", password:"BYF2025admin", role:"admin"   },
-  { id:"u1",    name:"Senshil Chand",  email:"senshilk@gmail.com",   password:"bhakti123",   role:"devotee" },
-  { id:"u2",    name:"Komal Chand",    email:"komal@gmail.com",      password:"bhakti123",   role:"devotee" },
-  { id:"u3",    name:"Rahul Kumar",    email:"rahul@gmail.com",      password:"bhakti123",   role:"devotee" },
-  { id:"u4",    name:"Roneel Narayan", email:"roneel@gmail.com",     password:"bhakti123",   role:"devotee" },
+  { id:"u1",    name:"Senshil Chand",  email:"senshilk@gmail.com",        password:"bhakti123",    role:"devotee" },
+  { id:"u2",    name:"Komal Chand",    email:"komal@gmail.com",           password:"bhakti123",    role:"devotee" },
+  { id:"u3",    name:"Rahul Kumar",    email:"rahul@gmail.com",           password:"bhakti123",    role:"devotee" },
+  { id:"u4",    name:"Roneel Narayan", email:"roneel@gmail.com",          password:"bhakti123",    role:"devotee" },
 ];
 
 // ─── IN-MEMORY STORE ───────────────────────────────────────────────────────────
-const store = { users: [...SEED_USERS], rosters: {}, cooking: {} };
+const store = {
+  users:    [...SEED_USERS],
+  rosters:  {},
+  cooking:  {},
+  venues:   {}, // keyed by "YYYY-M-weekIdx" → venue string
+  settings: { ...DEFAULT_SETTINGS, cookingGroups: DEFAULT_SETTINGS.cookingGroups.map(g=>({...g})) },
+};
 
+// ─── HELPERS ───────────────────────────────────────────────────────────────────
 function getSundays(year, month) {
-  const sundays = [];
-  const d = new Date(year, month, 1);
+  const s = []; const d = new Date(year, month, 1);
   while (d.getDay() !== 0) d.setDate(d.getDate() + 1);
-  while (d.getMonth() === month) { sundays.push(new Date(d)); d.setDate(d.getDate() + 7); }
-  return sundays;
+  while (d.getMonth() === month) { s.push(new Date(d)); d.setDate(d.getDate() + 7); }
+  return s;
 }
-function fmtLong(d)  { return d.toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long",year:"numeric"}); }
-function fmtShort(d) { return d.toLocaleDateString("en-AU",{day:"numeric",month:"short"}); }
+function fmtLong(d)   { return d.toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long",year:"numeric"}); }
+function fmtShort(d)  { return d.toLocaleDateString("en-AU",{day:"numeric",month:"short"}); }
 function fmtMonth(y,m){ return new Date(y,m,1).toLocaleString("en-AU",{month:"long",year:"numeric"}); }
 
 function isSignupOpen(year, month) {
-  const now   = new Date();
-  const pm    = month===0?11:month-1;
-  const py    = month===0?year-1:year;
-  const opens = new Date(py, pm, SIGNUP_OPENS_DAY);
+  const now = new Date();
+  const pm  = month===0?11:month-1;
+  const py  = month===0?year-1:year;
+  const opens = new Date(py, pm, store.settings.signupOpensDay);
   const close = new Date(year, month+1, 0);
-  return now>=opens && now<=close;
+  return now >= opens && now <= close;
 }
 
 function ensureRoster(year, month) {
@@ -61,22 +128,25 @@ function ensureRoster(year, month) {
   if (!store.rosters[key]) {
     const s = getSundays(year, month);
     const r = {}; const c = {};
-    s.forEach((_,i)=>{
-      r[i]={morning:{},evening:{}};
-      MORNING_ROLES.forEach(x=>{r[i].morning[x.id]=null;});
-      EVENING_ROLES.forEach(x=>{r[i].evening[x.id]=null;});
-      c[i]=COOKING_GROUPS[i%COOKING_GROUPS.length];
+    s.forEach((_,i) => {
+      r[i] = { morning:{}, evening:{} };
+      MORNING_ROLES.forEach(x => { r[i].morning[x.id] = null; });
+      EVENING_ROLES.forEach(x => { r[i].evening[x.id] = null; });
+      c[i] = store.settings.cookingGroups[i % store.settings.cookingGroups.length];
     });
-    store.rosters[key]=r; store.cooking[key]=c;
+    store.rosters[key] = r;
+    store.cooking[key] = c;
   }
 }
-function getRoster(year,month){ ensureRoster(year,month); return {roster:store.rosters[`${year}-${month}`], cooking:store.cooking[`${year}-${month}`]}; }
-function setSlot(year,month,wi,session,roleId,person){ ensureRoster(year,month); store.rosters[`${year}-${month}`][wi][session][roleId]=person; }
-function setCook(year,month,wi,group){ ensureRoster(year,month); store.cooking[`${year}-${month}`][wi]=group; }
+function getRoster(y,m) { ensureRoster(y,m); return { roster: store.rosters[`${y}-${m}`], cooking: store.cooking[`${y}-${m}`] }; }
+function setSlot(y,m,wi,session,roleId,person) { ensureRoster(y,m); store.rosters[`${y}-${m}`][wi][session][roleId] = person; }
+function setCook(y,m,wi,group) { ensureRoster(y,m); store.cooking[`${y}-${m}`][wi] = group; }
+function getVenue(y,m,wi) { return store.venues[`${y}-${m}-${wi}`] || EVENING_VENUES[0]; }
+function setVenue(y,m,wi,v) { store.venues[`${y}-${m}-${wi}`] = v; }
 
-function getUserServices(uid,year,month){
-  ensureRoster(year,month);
-  const key=`${year}-${month}`; const sundays=getSundays(year,month); const out=[];
+function getUserServices(uid,y,m) {
+  ensureRoster(y,m);
+  const key=`${y}-${m}`; const sundays=getSundays(y,m); const out=[];
   sundays.forEach((sunday,wi)=>{
     const w=store.rosters[key][wi];
     MORNING_ROLES.forEach(r=>{ if(w.morning[r.id]?.id===uid) out.push({wi,sunday,session:"Morning",role:r.label,time:r.time,roleId:r.id}); });
@@ -85,90 +155,108 @@ function getUserServices(uid,year,month){
   return out;
 }
 
-// ─── CLAUDE EMAIL ──────────────────────────────────────────────────────────────
-async function callClaude(prompt) {
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:700,messages:[{role:"user",content:prompt}]})});
-    const d = await res.json();
-    return d.content?.[0]?.text||"";
-  } catch { return ""; }
-}
-
-async function genWelcomeEmail(name,email,password){
-  return callClaude(`Write a short warm welcome email for ${name} joining Bhakti Yoga Foundation volunteer roster system. Their login: email=${email}, password=${password}. Org: Bhakti Yoga Foundation (Simple Living·High Thinking), Queensland AU. Reply-to: bhaktiyoga.org@gmail.com. Only the email body, warm spiritual tone, 3 short paragraphs, include credentials clearly, end "In loving service, Bhakti Yoga Foundation". Plain text.`);
-}
-async function genRosterEmail(name,assignments){
-  const list=assignments.map(a=>`- ${a.role} on ${fmtLong(a.sunday)} (${a.time}, ${a.session} Program)`).join("\n");
-  return callClaude(`Write a warm confirmation email for Bhakti Yoga Foundation devotee ${name} who signed up for:\n${list}\nRemind them to speak to admin for any changes. Reply-to: bhaktiyoga.org@gmail.com. Only email body, spiritual warm tone, end "In loving service, Bhakti Yoga Foundation". Plain text.`);
-}
-
 // ─── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function App() {
   const now = new Date();
-  const [user,   setUser]   = useState(null);
-  const [page,   setPage]   = useState("login");
+  const [user,    setUser]    = useState(null);
+  const [page,    setPage]    = useState("login");
   const [vy, setVy] = useState(now.getFullYear());
   const [vm, setVm] = useState(now.getMonth());
   const [sundays, setSundays] = useState([]);
   const [roster,  setRoster]  = useState({});
   const [cooking, setCooking] = useState({});
   const [selWeek, setSelWeek] = useState(0);
-  const [loginEmail, setLE] = useState("");
-  const [loginPass,  setLP] = useState("");
+  const [loginEmail, setLE]   = useState("");
+  const [loginPass,  setLP]   = useState("");
   const [loginErr,   setLErr] = useState("");
-  const [signing,    setSigning]  = useState(false);
-  const [notif,      setNotif]    = useState(null);
-  const [emailPrev,  setEmailPrev]= useState("");
-  const [showEmail,  setShowEmail]= useState(false);
-  const [adminTab,   setAdminTab] = useState("roster");
-  const [newU,       setNewU]     = useState({name:"",email:"",password:""});
-  const [creating,   setCreating] = useState(false);
-  const [createMsg,  setCreateMsg]= useState("");
+  const [signing,    setSigning]   = useState(false);
+  const [notif,      setNotif]     = useState(null);
+  const [emailPrev,  setEmailPrev] = useState("");
+  const [showEmail,  setShowEmail] = useState(false);
+  const [adminTab,   setAdminTab]  = useState("roster");
+  const [newU,       setNewU]      = useState({name:"",email:"",password:""});
+  const [creating,   setCreating]  = useState(false);
+  const [createMsg,  setCreateMsg] = useState("");
+  const [settings,   setSettings]  = useState({...store.settings, cookingGroups: store.settings.cookingGroups.map(g=>({...g}))});
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsMsg, setSettingsMsg] = useState("");
   const [_, forceUpdate] = useState(0);
 
-  const refresh = () => { const {roster:r,cooking:c}=getRoster(vy,vm); setRoster({...r}); setCooking({...c}); };
+  const refresh = () => {
+    const {roster:r, cooking:c} = getRoster(vy,vm);
+    setRoster({...r}); setCooking({...c});
+  };
 
-  useEffect(()=>{
-    const s=getSundays(vy,vm); setSundays(s); refresh(); setSelWeek(0);
-  },[vy,vm]);
+  useEffect(() => {
+    const s = getSundays(vy,vm); setSundays(s); refresh(); setSelWeek(0);
+  }, [vy,vm]);
 
-  const notify=(msg,type="success")=>{ setNotif({msg,type}); setTimeout(()=>setNotif(null),5000); };
+  const notify = (msg, type="success") => { setNotif({msg,type}); setTimeout(()=>setNotif(null),5000); };
+  const prevMonth = () => { if(vm===0){setVm(11);setVy(y=>y-1);}else setVm(m=>m-1); };
+  const nextMonth = () => { if(vm===11){setVm(0);setVy(y=>y+1);}else setVm(m=>m+1); };
 
-  const handleLogin=()=>{
-    const u=store.users.find(x=>x.email.toLowerCase()===loginEmail.toLowerCase()&&x.password===loginPass);
+  const handleLogin = () => {
+    const u = store.users.find(x => x.email.toLowerCase()===loginEmail.toLowerCase() && x.password===loginPass);
     if(!u){setLErr("Incorrect email or password.");return;}
     setUser(u); setLErr(""); setPage(u.role==="admin"?"admin":"dashboard");
   };
-  const handleLogout=()=>{ setUser(null); setPage("login"); setLE(""); setLP(""); };
-  const prevMonth=()=>{ if(vm===0){setVm(11);setVy(y=>y-1);}else setVm(m=>m-1); };
-  const nextMonth=()=>{ if(vm===11){setVm(0);setVy(y=>y+1);}else setVm(m=>m+1); };
+  const handleLogout = () => { setUser(null); setPage("login"); setLE(""); setLP(""); };
 
-  const handleSignup=async(wi,session,roleId)=>{
-    if(!isSignupOpen(vy,vm)){notify("Sign-ups open on the 24th of the previous month.","error");return;}
+  const handleSignup = async (wi, session, roleId) => {
+    if(!isSignupOpen(vy,vm)){notify("Sign-ups open on the "+store.settings.signupOpensDay+"th of the previous month.","error");return;}
     setSigning(true);
     setSlot(vy,vm,wi,session,roleId,{id:user.id,name:user.name,email:user.email});
     refresh();
-    const services=getUserServices(user.id,vy,vm);
-    const email=await genRosterEmail(user.name,services.map(s=>({role:s.role,sunday:s.sunday,time:s.time,session:s.session})));
-    setEmailPrev(email); setShowEmail(true); setSigning(false);
-    notify(`✓ Signed up successfully!`);
+    const services = getUserServices(user.id,vy,vm);
+    const emailBody = await genRosterEmail(user.name, services.map(s=>({role:s.role,sunday:s.sunday,time:s.time,session:s.session})));
+    // Send real email
+    const roleObj = session==="morning" ? MORNING_ROLES.find(r=>r.id===roleId) : EVENING_ROLES.find(r=>r.id===roleId);
+    await sendRealEmail(user.name, user.email, `✓ Service Confirmed – ${roleObj?.label} on ${fmtShort(sundays[wi])}`, emailBody);
+    setEmailPrev(emailBody); setShowEmail(true); setSigning(false);
+    notify("✓ Signed up! Confirmation email sent to "+user.email);
   };
 
-  const handleClearSlot=(wi,session,roleId)=>{ setSlot(vy,vm,wi,session,roleId,null); refresh(); notify("Slot cleared."); };
+  const handleClearSlot = (wi,session,roleId) => { setSlot(vy,vm,wi,session,roleId,null); refresh(); notify("Slot cleared."); };
 
-  const handleCreateUser=async()=>{
+  const handleCreateUser = async () => {
     if(!newU.name||!newU.email||!newU.password){setCreateMsg("Please fill in all fields.");return;}
     if(store.users.find(x=>x.email.toLowerCase()===newU.email.toLowerCase())){setCreateMsg("Email already exists.");return;}
     setCreating(true);
-    const u={id:"u"+Date.now(),name:newU.name,email:newU.email,password:newU.password,role:"devotee"};
+    const u = {id:"u"+Date.now(), name:newU.name, email:newU.email, password:newU.password, role:"devotee"};
     store.users.push(u);
-    await genWelcomeEmail(newU.name,newU.email,newU.password);
-    setCreating(false); setCreateMsg(`✓ Account created for ${newU.name}. Welcome email sent to ${newU.email}.`);
+    const emailBody = await genWelcomeEmail(newU.name, newU.email, newU.password);
+    await sendRealEmail(newU.name, newU.email, "Welcome to Bhakti Yoga Foundation Roster", emailBody);
+    setCreating(false);
+    setCreateMsg(`✓ Account created for ${newU.name}. Welcome email sent to ${newU.email}.`);
     setNewU({name:"",email:"",password:""}); forceUpdate(x=>x+1);
     setTimeout(()=>setCreateMsg(""),5000);
   };
 
-  const handleDeleteUser=(id)=>{ const i=store.users.findIndex(x=>x.id===id); if(i!==-1)store.users.splice(i,1); notify("Devotee removed."); forceUpdate(x=>x+1); };
+  const handleDeleteUser = (id) => {
+    const i = store.users.findIndex(x=>x.id===id);
+    if(i!==-1) store.users.splice(i,1);
+    notify("Devotee removed."); forceUpdate(x=>x+1);
+  };
+
+  const handleChangePassword = (id, newPw) => {
+    const u = store.users.find(x=>x.id===id);
+    if(u) u.password = newPw;
+    notify("Password updated for "+u?.name);
+    forceUpdate(x=>x+1);
+  };
+
+  const handleSaveSettings = () => {
+    setSavingSettings(true);
+    store.settings.signupOpensDay = settings.signupOpensDay;
+    store.settings.cookingGroups  = settings.cookingGroups.map(g=>({...g}));
+    // Reset rosters so cooking groups refresh
+    store.rosters = {}; store.cooking = {};
+    refresh();
+    setSavingSettings(false);
+    setSettingsMsg("✓ Settings saved successfully!");
+    setTimeout(()=>setSettingsMsg(""),4000);
+    notify("Settings saved!");
+  };
 
   const myServices = user ? getUserServices(user.id,vy,vm) : [];
   const open = isSignupOpen(vy,vm);
@@ -177,10 +265,10 @@ export default function App() {
     <div style={R.root}>
       <style>{css}</style>
       <div style={R.bg1}/><div style={R.bg2}/>
+      {notif && <div className="anim-in" style={{...R.notif, background: notif.type==="error"?"#7a1515":"#1a4230"}}>{notif.msg}</div>}
 
-      {notif&&<div className="anim-in" style={{...R.notif,background:notif.type==="error"?"#7a1515":"#1a4230"}}>{notif.msg}</div>}
-
-      {user&&(
+      {/* HEADER */}
+      {user && (
         <header style={R.hdr}>
           <div style={R.hdrIn}>
             <div style={R.brand}>
@@ -191,11 +279,11 @@ export default function App() {
               </div>
             </div>
             <nav style={R.nav}>
-              {user.role!=="admin"&&<>
+              {user.role!=="admin" && <>
                 <NBtn active={page==="dashboard"} onClick={()=>setPage("dashboard")}>My Services</NBtn>
-                <NBtn active={page==="roster"} onClick={()=>setPage("roster")}>Roster</NBtn>
+                <NBtn active={page==="roster"}    onClick={()=>setPage("roster")}>Roster</NBtn>
               </>}
-              {user.role==="admin"&&<NBtn active onClick={()=>setPage("admin")}>Admin Panel</NBtn>}
+              {user.role==="admin" && <NBtn active onClick={()=>setPage("admin")}>Admin Panel</NBtn>}
               <div style={R.chip}>
                 <Av name={user.name}/>
                 <span style={{color:"#c8922a",fontFamily:"Lato,sans-serif",fontSize:13}}>{user.name.split(" ")[0]}</span>
@@ -206,10 +294,10 @@ export default function App() {
         </header>
       )}
 
-      <main style={{...R.main,paddingTop:user?90:0}}>
+      <main style={{...R.main, paddingTop: user?90:0}}>
 
         {/* LOGIN */}
-        {page==="login"&&(
+        {page==="login" && (
           <div className="anim-in" style={R.loginWrap}>
             <div style={R.loginCard}>
               <div style={{fontSize:56,marginBottom:16}}>🪷</div>
@@ -218,7 +306,7 @@ export default function App() {
               <div style={{fontFamily:"Lato,sans-serif",fontSize:11,color:"#c8922a",letterSpacing:2.5,marginBottom:32}}>SIMPLE LIVING · HIGH THINKING</div>
               <input style={R.inp} type="email" placeholder="Email address" value={loginEmail} onChange={e=>setLE(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
               <input style={{...R.inp,marginTop:10}} type="password" placeholder="Password" value={loginPass} onChange={e=>setLP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
-              {loginErr&&<div style={{color:"#8b1a1a",fontFamily:"Lato,sans-serif",fontSize:13,marginTop:8,textAlign:"left"}}>{loginErr}</div>}
+              {loginErr && <div style={{color:"#8b1a1a",fontFamily:"Lato,sans-serif",fontSize:13,marginTop:8,textAlign:"left"}}>{loginErr}</div>}
               <button style={{...R.primBtn,marginTop:18}} onClick={handleLogin}>Sign In 🙏</button>
               <div style={{marginTop:18,fontFamily:"Lato,sans-serif",fontSize:12,color:"#bbb"}}>Contact your admin to receive login details</div>
             </div>
@@ -226,17 +314,15 @@ export default function App() {
         )}
 
         {/* DASHBOARD */}
-        {page==="dashboard"&&user&&(
+        {page==="dashboard" && user && (
           <div className="anim-in" style={R.pw}>
             <h1 style={R.pageH}>Hare Krishna, {user.name.split(" ")[0]}! 🙏</h1>
             <p style={R.pageSub}>Your upcoming services</p>
             <MNav y={vy} m={vm} onP={prevMonth} onN={nextMonth}/>
-
             {open
-              ? <div style={R.openBan}><span style={{fontSize:22}}>🔓</span><div><div style={{fontWeight:"bold",fontSize:15}}>Roster open for {fmtMonth(vy,vm)}</div><div style={{fontSize:13,opacity:0.85,marginTop:2,fontFamily:"Lato,sans-serif"}}>Go to the Roster tab to sign up</div></div><button style={R.goBtn} onClick={()=>setPage("roster")}>Go to Roster →</button></div>
-              : <div style={R.closeBan}><span style={{fontSize:20}}>🔒</span><div style={{fontFamily:"Lato,sans-serif",fontSize:14}}><strong>Sign-ups for {fmtMonth(vy,vm)}</strong> open on the 24th of the previous month.<br/><span style={{fontSize:12,opacity:0.8}}>To change your service, contact admin</span></div></div>
+              ? <div style={R.openBan}><span style={{fontSize:22}}>🔓</span><div><div style={{fontWeight:"bold",fontSize:15}}>Roster open for {fmtMonth(vy,vm)}</div><div style={{fontSize:13,opacity:0.85,marginTop:2,fontFamily:"Lato,sans-serif"}}>Go to Roster tab to sign up</div></div><button style={R.goBtn} onClick={()=>setPage("roster")}>Go to Roster →</button></div>
+              : <div style={R.closeBan}><span style={{fontSize:20}}>🔒</span><div style={{fontFamily:"Lato,sans-serif",fontSize:14}}><strong>Sign-ups for {fmtMonth(vy,vm)}</strong> open on the {store.settings.signupOpensDay}th of the previous month.<br/><span style={{fontSize:12,opacity:0.8}}>To change your service, contact admin</span></div></div>
             }
-
             {myServices.length===0
               ? <div style={R.empty}><div style={{fontSize:40,marginBottom:12}}>📋</div><div style={{fontSize:15,color:"#7a5c3a",fontFamily:"Lato,sans-serif"}}>No services signed up for {fmtMonth(vy,vm)} yet.</div>{open&&<button style={{...R.primBtn,marginTop:16,width:"auto",padding:"10px 28px"}} onClick={()=>setPage("roster")}>Go to Roster</button>}</div>
               : <div style={R.svcGrid}>{myServices.map((s,i)=>(
@@ -250,8 +336,7 @@ export default function App() {
                   </div>
                 ))}</div>
             }
-
-            {showEmail&&emailPrev&&(
+            {showEmail && emailPrev && (
               <div style={R.emailBox}>
                 <div style={{fontFamily:"Lato,sans-serif",fontSize:12,fontWeight:"bold",color:"#7a5c3a",marginBottom:10}}>📧 Confirmation email sent to {user.email}</div>
                 <div style={{fontFamily:"Lato,sans-serif",fontSize:13,color:"#3d2b10",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{emailPrev}</div>
@@ -262,54 +347,45 @@ export default function App() {
         )}
 
         {/* ROSTER */}
-        {page==="roster"&&user&&(
+        {page==="roster" && user && (
           <div className="anim-in" style={R.pw}>
             <h1 style={R.pageH}>Monthly Roster</h1>
             <p style={R.pageSub}>{fmtMonth(vy,vm)} · Sign up for your services</p>
             <MNav y={vy} m={vm} onP={prevMonth} onN={nextMonth}/>
-
             <div style={open?R.openBan:R.closeBan}>
               <span style={{fontSize:20}}>{open?"🔓":"🔒"}</span>
-              <div style={{fontFamily:"Lato,sans-serif",fontSize:14,color:open?"#1a3a2a":"#5a3a10"}}>
-                {open?<><strong>Roster is open</strong> — click any role to sign up for {fmtMonth(vy,vm)}</>:<><strong>Roster not yet open.</strong> Sign-ups open on the 24th of the previous month.</>}
+              <div style={{fontFamily:"Lato,sans-serif",fontSize:14}}>
+                {open ? <><strong>Roster is open</strong> — click any role to sign up</> : <><strong>Not open yet.</strong> Sign-ups open on the {store.settings.signupOpensDay}th of the previous month.</>}
               </div>
             </div>
-
             <WeekTabs sundays={sundays} sel={selWeek} onSel={setSelWeek}/>
-
-            {sundays[selWeek]&&<>
+            {sundays[selWeek] && <>
               <div style={R.sundayLbl}>☀️ {fmtLong(sundays[selWeek])}</div>
-
               <Sec icon="🍛" title="Evening Cooking" sub="Assigned by monthly rotation">
-                {cooking[selWeek]&&<div style={{...R.cookBadge,background:cooking[selWeek].color+"18",borderColor:cooking[selWeek].color}}>
+                {cooking[selWeek] && <div style={{...R.cookBadge,background:cooking[selWeek].color+"18",borderColor:cooking[selWeek].color}}>
                   <span style={{width:12,height:12,borderRadius:"50%",background:cooking[selWeek].color,display:"inline-block",flexShrink:0}}/>
                   <span style={{fontWeight:"bold",fontSize:15}}>{cooking[selWeek].name}</span>
                   <span style={{fontFamily:"Lato,sans-serif",fontSize:13,color:"#7a5c3a"}}>is cooking this Sunday</span>
                 </div>}
               </Sec>
-
-              <Sec icon="🌅" title="Morning Program" sub="9:30–11:00 AM · Pendicup Community Centre, Warner">
+              <Sec icon="🌅" title="Morning Program" sub={`9:30–11:00 AM · ${store.settings.morningVenue}`}>
                 <div style={R.roleGrid}>
                   {MORNING_ROLES.map(role=>{
-                    const taken=roster[selWeek]?.morning[role.id];
-                    const isMe=taken?.id===user.id;
+                    const taken=roster[selWeek]?.morning[role.id]; const isMe=taken?.id===user.id;
                     return <RCard key={role.id} role={role} taken={taken} isMe={isMe} open={open} signing={signing} onSignup={()=>handleSignup(selWeek,"morning",role.id)}/>;
                   })}
                 </div>
               </Sec>
-
-              <Sec icon="🌙" title="Evening Festival" sub="5:00–7:00 PM · Warner or Petrie">
+              <Sec icon="🌙" title="Evening Festival" sub={`5:00–7:00 PM · ${getVenue(vy,vm,selWeek)}`}>
                 <div style={R.roleGrid}>
                   {EVENING_ROLES.map(role=>{
-                    const taken=roster[selWeek]?.evening[role.id];
-                    const isMe=taken?.id===user.id;
+                    const taken=roster[selWeek]?.evening[role.id]; const isMe=taken?.id===user.id;
                     return <RCard key={role.id} role={role} taken={taken} isMe={isMe} open={open} signing={signing} onSignup={()=>handleSignup(selWeek,"evening",role.id)}/>;
                   })}
                 </div>
               </Sec>
             </>}
-
-            {showEmail&&emailPrev&&(
+            {showEmail && emailPrev && (
               <div style={R.emailBox}>
                 <div style={{fontFamily:"Lato,sans-serif",fontSize:12,fontWeight:"bold",color:"#7a5c3a",marginBottom:10}}>📧 Confirmation sent to {user.email}</div>
                 <div style={{fontFamily:"Lato,sans-serif",fontSize:13,color:"#3d2b10",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{emailPrev}</div>
@@ -320,39 +396,56 @@ export default function App() {
         )}
 
         {/* ADMIN */}
-        {page==="admin"&&user?.role==="admin"&&(
+        {page==="admin" && user?.role==="admin" && (
           <div className="anim-in" style={R.pw}>
             <h1 style={R.pageH}>Admin Panel</h1>
-            <p style={R.pageSub}>Manage devotees, roster, and assignments</p>
-
-            <div style={{display:"flex",gap:8,marginBottom:24}}>
-              {["roster","users"].map(t=>(
+            <p style={R.pageSub}>Full control over roster, devotees, and settings</p>
+            <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
+              {["roster","devotees","settings"].map(t=>(
                 <button key={t} onClick={()=>setAdminTab(t)} style={{...R.atab,...(adminTab===t?R.atabOn:{})}}>
-                  {t==="roster"?"📋 Roster":"👥 Devotees"}
+                  {t==="roster"?"📋 Roster":t==="devotees"?"👥 Devotees":"⚙️ Settings"}
                 </button>
               ))}
             </div>
 
-            {adminTab==="roster"&&<>
+            {/* ── ROSTER TAB ── */}
+            {adminTab==="roster" && <>
               <MNav y={vy} m={vm} onP={prevMonth} onN={nextMonth}/>
               <WeekTabs sundays={sundays} sel={selWeek} onSel={setSelWeek}/>
-
-              {sundays[selWeek]&&<>
+              {sundays[selWeek] && <>
                 <div style={R.sundayLbl}>☀️ {fmtLong(sundays[selWeek])}</div>
 
+                {/* Evening venue selector */}
                 <div style={R.aCard}>
-                  <div style={R.aCardT}>🍛 Cooking Group</div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {COOKING_GROUPS.map(g=>{
-                      const on=cooking[selWeek]?.id===g.id;
-                      return <button key={g.id} style={{background:on?g.color:g.color+"22",color:on?"#fff":g.color,border:`2px solid ${g.color}`,borderRadius:8,padding:"8px 14px",cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:13,fontWeight:"bold"}}
-                        onClick={()=>{setCook(vy,vm,selWeek,g);refresh();}}>{g.name}</button>;
+                  <div style={R.aCardT}>🏛️ Evening Venue — {fmtShort(sundays[selWeek])}</div>
+                  <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                    {EVENING_VENUES.map(v=>{
+                      const active = getVenue(vy,vm,selWeek)===v;
+                      return <button key={v} onClick={()=>{setVenue(vy,vm,selWeek,v);forceUpdate(x=>x+1);notify("Venue updated!");}}
+                        style={{background:active?"#2d7d9a":"#2d7d9a18",color:active?"#fff":"#2d7d9a",border:`2px solid #2d7d9a`,borderRadius:8,padding:"8px 16px",cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:13,fontWeight:"bold"}}>
+                        {v}
+                      </button>;
                     })}
                   </div>
                 </div>
 
+                {/* Cooking group */}
                 <div style={R.aCard}>
-                  <div style={R.aCardT}>🌅 Morning Program</div>
+                  <div style={R.aCardT}>🍛 Cooking Group — {fmtShort(sundays[selWeek])}</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {store.settings.cookingGroups.map(g=>{
+                      const on=cooking[selWeek]?.id===g.id;
+                      return <button key={g.id} style={{background:on?g.color:g.color+"22",color:on?"#fff":g.color,border:`2px solid ${g.color}`,borderRadius:8,padding:"8px 14px",cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:13,fontWeight:"bold"}}
+                        onClick={()=>{setCook(vy,vm,selWeek,g);refresh();notify("Cooking group updated!");}}>
+                        {g.name}
+                      </button>;
+                    })}
+                  </div>
+                </div>
+
+                {/* Morning slots */}
+                <div style={R.aCard}>
+                  <div style={R.aCardT}>🌅 Morning Program · {store.settings.morningVenue.split(",")[0]}</div>
                   <div style={R.aGrid}>
                     {MORNING_ROLES.map(role=>{
                       const p=roster[selWeek]?.morning[role.id];
@@ -363,8 +456,9 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Evening slots */}
                 <div style={R.aCard}>
-                  <div style={R.aCardT}>🌙 Evening Festival</div>
+                  <div style={R.aCardT}>🌙 Evening Festival · {getVenue(vy,vm,selWeek)}</div>
                   <div style={R.aGrid}>
                     {EVENING_ROLES.map(role=>{
                       const p=roster[selWeek]?.evening[role.id];
@@ -377,7 +471,8 @@ export default function App() {
               </>}
             </>}
 
-            {adminTab==="users"&&<>
+            {/* ── DEVOTEES TAB ── */}
+            {adminTab==="devotees" && <>
               <div style={R.aCard}>
                 <div style={R.aCardT}>➕ Add New Devotee</div>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -385,28 +480,84 @@ export default function App() {
                   <input style={R.inp} type="email" placeholder="Email address" value={newU.email} onChange={e=>setNewU(u=>({...u,email:e.target.value}))}/>
                   <input style={R.inp} placeholder="Set password" value={newU.password} onChange={e=>setNewU(u=>({...u,password:e.target.value}))}/>
                   <button style={{...R.primBtn,width:"auto",padding:"11px 24px",opacity:creating?0.7:1}} onClick={handleCreateUser} disabled={creating}>
-                    {creating?"Creating account...":"Create Account & Send Welcome Email"}
+                    {creating?"Creating account…":"Create Account & Send Welcome Email"}
                   </button>
                 </div>
-                {createMsg&&<div style={{marginTop:12,fontSize:13,fontFamily:"Lato,sans-serif",color:createMsg.startsWith("✓")?"#2d6a4f":"#8b1a1a"}}>{createMsg}</div>}
+                {createMsg && <div style={{marginTop:12,fontSize:13,fontFamily:"Lato,sans-serif",color:createMsg.startsWith("✓")?"#2d6a4f":"#8b1a1a"}}>{createMsg}</div>}
               </div>
 
               <div style={R.aCard}>
                 <div style={R.aCardT}>👥 All Devotees ({store.users.filter(x=>x.role!=="admin").length})</div>
-                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
                   {store.users.map(u=>(
-                    <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,background:"#f8f4ee",borderRadius:10,padding:"12px 14px"}}>
-                      <Av name={u.name}/>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:"bold",fontSize:14}}>{u.name}</div>
-                        <div style={{fontFamily:"Lato,sans-serif",fontSize:12,color:"#7a5c3a"}}>{u.email}</div>
+                    <DevoteeRow key={u.id} u={u}
+                      onDelete={()=>handleDeleteUser(u.id)}
+                      onChangePassword={(pw)=>handleChangePassword(u.id,pw)}/>
+                  ))}
+                </div>
+              </div>
+            </>}
+
+            {/* ── SETTINGS TAB ── */}
+            {adminTab==="settings" && <>
+              {/* Signup open day */}
+              <div style={R.aCard}>
+                <div style={R.aCardT}>📅 Roster Sign-up Window</div>
+                <div style={{fontFamily:"Lato,sans-serif",fontSize:13,color:"#7a5c3a",marginBottom:14}}>
+                  Devotees can sign up for next month's roster starting from this day of the current month.
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <label style={{fontFamily:"Lato,sans-serif",fontSize:14,color:"#3d2b10",fontWeight:"bold"}}>Sign-ups open on day:</label>
+                  <input type="number" min="1" max="28"
+                    style={{...R.inp,width:80,textAlign:"center"}}
+                    value={settings.signupOpensDay}
+                    onChange={e=>setSettings(s=>({...s,signupOpensDay:parseInt(e.target.value)||24}))}/>
+                  <span style={{fontFamily:"Lato,sans-serif",fontSize:13,color:"#7a5c3a"}}>of each month</span>
+                </div>
+              </div>
+
+              {/* Cooking groups */}
+              <div style={R.aCard}>
+                <div style={R.aCardT}>🍛 Cooking Groups</div>
+                <div style={{fontFamily:"Lato,sans-serif",fontSize:13,color:"#7a5c3a",marginBottom:14}}>
+                  Edit the names of your 4 cooking groups. They rotate automatically each Sunday.
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                  {settings.cookingGroups.map((g,i)=>(
+                    <div key={g.id} style={{display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{width:16,height:16,borderRadius:"50%",background:g.color,flexShrink:0}}/>
+                      <input style={{...R.inp,flex:1}} value={g.name}
+                        onChange={e=>{const cg=[...settings.cookingGroups]; cg[i]={...cg[i],name:e.target.value}; setSettings(s=>({...s,cookingGroups:cg}));}}/>
+                      <div style={{display:"flex",gap:6}}>
+                        {["#c0622a","#2d7d9a","#3a8a5c","#7a4fa0","#b5860d","#8b2252"].map(col=>(
+                          <button key={col} onClick={()=>{const cg=[...settings.cookingGroups]; cg[i]={...cg[i],color:col}; setSettings(s=>({...s,cookingGroups:cg}));}}
+                            style={{width:20,height:20,borderRadius:"50%",background:col,border:g.color===col?"3px solid #1a1209":"2px solid transparent",cursor:"pointer"}}/>
+                        ))}
                       </div>
-                      <div style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontFamily:"Lato,sans-serif",fontWeight:"bold",background:u.role==="admin"?"#c8922a22":"#2d7d9a22",color:u.role==="admin"?"#c8922a":"#2d7d9a"}}>{u.role}</div>
-                      {u.role!=="admin"&&<button style={{background:"#8b1a1a22",color:"#8b1a1a",border:"1px solid #8b1a1a44",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:12}} onClick={()=>handleDeleteUser(u.id)}>Remove</button>}
                     </div>
                   ))}
                 </div>
               </div>
+
+              {/* Morning venue (read only info) */}
+              <div style={R.aCard}>
+                <div style={R.aCardT}>🌅 Morning Venue (Fixed)</div>
+                <div style={{fontFamily:"Lato,sans-serif",fontSize:14,color:"#3d2b10",background:"#f8f4ee",padding:"12px 16px",borderRadius:8,border:"1px solid #f5e6c8"}}>
+                  📍 {store.settings.morningVenue}
+                </div>
+                <div style={{fontFamily:"Lato,sans-serif",fontSize:12,color:"#bbb",marginTop:8,fontStyle:"italic"}}>Morning venue is fixed. Evening venue is set per-Sunday in the Roster tab.</div>
+              </div>
+
+              {/* Admin password change */}
+              <div style={R.aCard}>
+                <div style={R.aCardT}>🔐 Change Admin Password</div>
+                <AdminPasswordChange user={user} onSave={(pw)=>handleChangePassword(user.id,pw)}/>
+              </div>
+
+              <button style={{...R.primBtn,width:"auto",padding:"13px 32px",opacity:savingSettings?0.7:1}} onClick={handleSaveSettings} disabled={savingSettings}>
+                {savingSettings?"Saving…":"💾 Save All Settings"}
+              </button>
+              {settingsMsg && <div style={{marginTop:12,fontFamily:"Lato,sans-serif",fontSize:13,color:"#2d6a4f",fontWeight:"bold"}}>{settingsMsg}</div>}
             </>}
           </div>
         )}
@@ -421,7 +572,7 @@ export default function App() {
 function Av({name}){ return <div style={{width:30,height:30,borderRadius:"50%",background:"#c8922a",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:"bold",fontFamily:"Lato,sans-serif",flexShrink:0}}>{name[0]}</div>; }
 function NBtn({active,onClick,children}){ return <button onClick={onClick} style={{background:"transparent",border:`1px solid ${active?"#c8922a":"#a0856a55"}`,color:active?"#c8922a":"#a0856a",padding:"7px 16px",borderRadius:5,cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:13,fontWeight:active?"700":"400",letterSpacing:0.3}}>{children}</button>; }
 function MNav({y,m,onP,onN}){ return <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:20,marginBottom:20}}><button onClick={onP} style={{background:"none",border:"2px solid #c8922a",color:"#c8922a",width:36,height:36,borderRadius:"50%",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button><div style={{fontSize:22,fontFamily:"'Playfair Display',serif",fontWeight:"bold",color:"#1a1209",minWidth:200,textAlign:"center"}}>{fmtMonth(y,m)}</div><button onClick={onN} style={{background:"none",border:"2px solid #c8922a",color:"#c8922a",width:36,height:36,borderRadius:"50%",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button></div>; }
-function WeekTabs({sundays,sel,onSel}){ return <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>{sundays.map((s,i)=><button key={i} onClick={()=>onSel(i)} style={{background:sel===i?"#e07b39":"rgba(255,255,255,0.8)",border:`1.5px solid ${sel===i?"#e07b39":"#f5e6c8"}`,color:sel===i?"#fff":"#3d2b10",borderRadius:10,padding:"10px 20px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:110,fontFamily:sel===i?"Lato,sans-serif":"'Playfair Display',serif"}}><span style={{fontSize:11,opacity:0.8,textTransform:"uppercase",letterSpacing:1,fontFamily:"Lato,sans-serif"}}>Week {i+1}</span><span style={{fontSize:17,fontWeight:"bold"}}>{fmtShort(s)}</span></button>)}</div>; }
+function WeekTabs({sundays,sel,onSel}){ return <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>{sundays.map((s,i)=><button key={i} onClick={()=>onSel(i)} style={{background:sel===i?"#e07b39":"rgba(255,255,255,0.8)",border:`1.5px solid ${sel===i?"#e07b39":"#f5e6c8"}`,color:sel===i?"#fff":"#3d2b10",borderRadius:10,padding:"10px 20px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:110}}><span style={{fontSize:11,opacity:0.8,textTransform:"uppercase",letterSpacing:1,fontFamily:"Lato,sans-serif"}}>Week {i+1}</span><span style={{fontSize:17,fontWeight:"bold",fontFamily:"'Playfair Display',serif"}}>{fmtShort(s)}</span></button>)}</div>; }
 function Sec({icon,title,sub,children}){ return <div style={{background:"rgba(255,255,255,0.85)",borderRadius:16,padding:"22px 26px",marginBottom:20,boxShadow:"0 4px 20px rgba(0,0,0,0.06)",border:"1px solid #f5e6c8"}}><div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:16}}><span style={{fontSize:26}}>{icon}</span><div><div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:"bold",color:"#1a1209"}}>{title}</div><div style={{fontFamily:"Lato,sans-serif",fontSize:12,color:"#7a5c3a",marginTop:2}}>{sub}</div></div></div>{children}</div>; }
 
 function RCard({role,taken,isMe,open,signing,onSignup}){
@@ -453,12 +604,42 @@ function ASlot({role,person,users,onClear,onAssign}){
   </div>;
 }
 
+function DevoteeRow({u, onDelete, onChangePassword}){
+  const [showPw, setShowPw] = useState(false);
+  const [newPw,  setNewPw]  = useState("");
+  return <div style={{background:"#f8f4ee",borderRadius:10,padding:"12px 16px"}}>
+    <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+      <Av name={u.name}/>
+      <div style={{flex:1,minWidth:120}}>
+        <div style={{fontWeight:"bold",fontSize:14}}>{u.name}</div>
+        <div style={{fontFamily:"Lato,sans-serif",fontSize:12,color:"#7a5c3a"}}>{u.email}</div>
+      </div>
+      <div style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontFamily:"Lato,sans-serif",fontWeight:"bold",background:u.role==="admin"?"#c8922a22":"#2d7d9a22",color:u.role==="admin"?"#c8922a":"#2d7d9a"}}>{u.role}</div>
+      <button onClick={()=>setShowPw(!showPw)} style={{background:"#e07b3922",color:"#e07b39",border:"1px solid #e07b3944",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:12}}>🔑 Change PW</button>
+      {u.role!=="admin" && <button onClick={onDelete} style={{background:"#8b1a1a22",color:"#8b1a1a",border:"1px solid #8b1a1a44",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:12}}>Remove</button>}
+    </div>
+    {showPw && <div style={{display:"flex",gap:8,marginTop:10,alignItems:"center"}}>
+      <input style={{...R.inp,flex:1,padding:"8px 12px"}} placeholder="New password" value={newPw} onChange={e=>setNewPw(e.target.value)}/>
+      <button onClick={()=>{if(newPw){onChangePassword(newPw);setNewPw("");setShowPw(false);}}} style={{background:"#c8922a",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:13,fontWeight:"bold"}}>Save</button>
+      <button onClick={()=>setShowPw(false)} style={{background:"none",border:"none",cursor:"pointer",color:"#7a5c3a",fontSize:18}}>×</button>
+    </div>}
+  </div>;
+}
+
+function AdminPasswordChange({user, onSave}){
+  const [pw, setPw] = useState("");
+  return <div style={{display:"flex",gap:8,alignItems:"center"}}>
+    <input style={{...R.inp,flex:1}} type="password" placeholder="New admin password" value={pw} onChange={e=>setPw(e.target.value)}/>
+    <button onClick={()=>{if(pw){onSave(pw);setPw("");}}} style={{background:"#c8922a",color:"#fff",border:"none",borderRadius:8,padding:"12px 20px",cursor:"pointer",fontFamily:"Lato,sans-serif",fontSize:13,fontWeight:"bold",flexShrink:0}}>Update</button>
+  </div>;
+}
+
 // ─── STYLES ────────────────────────────────────────────────────────────────────
 const R = {
   root:{minHeight:"100vh",fontFamily:"'Playfair Display',Georgia,serif",color:"#1a1209",position:"relative",overflowX:"hidden"},
   bg1:{position:"fixed",inset:0,background:"linear-gradient(150deg,#fdf3e3 0%,#fde9cc 45%,#e8f2f7 100%)",zIndex:0},
   bg2:{position:"fixed",inset:0,backgroundImage:"radial-gradient(circle at 15% 20%,rgba(224,123,57,0.1) 0%,transparent 45%),radial-gradient(circle at 85% 75%,rgba(45,125,154,0.1) 0%,transparent 45%)",zIndex:0},
-  notif:{position:"fixed",top:16,right:16,padding:"12px 22px",borderRadius:8,color:"#fff",fontFamily:"Lato,sans-serif",fontSize:14,zIndex:1000,boxShadow:"0 4px 20px rgba(0,0,0,0.25)",maxWidth:320},
+  notif:{position:"fixed",top:16,right:16,padding:"12px 22px",borderRadius:8,color:"#fff",fontFamily:"Lato,sans-serif",fontSize:14,zIndex:1000,boxShadow:"0 4px 20px rgba(0,0,0,0.25)",maxWidth:360},
   hdr:{position:"fixed",top:0,left:0,right:0,zIndex:100,background:"rgba(26,18,9,0.96)",backdropFilter:"blur(8px)",borderBottom:"2px solid #c8922a33"},
   hdrIn:{maxWidth:1000,margin:"0 auto",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between"},
   brand:{display:"flex",alignItems:"center",gap:12},
@@ -499,6 +680,7 @@ const css = `
   *{box-sizing:border-box;margin:0;padding:0;}
   button:hover{filter:brightness(1.08);}
   input:focus{outline:2px solid #c8922a;outline-offset:1px;}
+  select:focus{outline:2px solid #c8922a;}
   ::-webkit-scrollbar{width:6px;} ::-webkit-scrollbar-thumb{background:#c8922a44;border-radius:3px;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
   @keyframes slideIn{from{opacity:0;transform:translateX(-8px);}to{opacity:1;transform:translateX(0);}}
