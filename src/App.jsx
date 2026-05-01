@@ -26,7 +26,7 @@ const SIGNUP_OPENS_DAY = 24;
 
 // ─── SEED USERS ────────────────────────────────────────────────────────────────
 const SEED_USERS = [
-  { id:"admin", name:"Keshav Kandel",  email:"keshkandel@gmail.com", password:"BYF2025admin", role:"admin"   },
+  { id:"admin", name:"Keshav Kandel",  email:"108divinerhythm@gmail.com", password:"BYF2025admin", role:"admin"   },
   { id:"u1",    name:"Senshil Chand",  email:"senshilk@gmail.com",   password:"bhakti123",   role:"devotee" },
   { id:"u2",    name:"Komal Chand",    email:"komal@gmail.com",      password:"bhakti123",   role:"devotee" },
   { id:"u3",    name:"Rahul Kumar",    email:"rahul@gmail.com",      password:"bhakti123",   role:"devotee" },
